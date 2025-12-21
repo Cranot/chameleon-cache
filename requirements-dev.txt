@@ -1,0 +1,10 @@
+# Development dependencies
+pytest>=7.0
+pytest-cov>=4.0
+
+# Optional: for benchmark visualization
+# matplotlib>=3.5
+
+# Optional: for profiling
+# memory-profiler>=0.60
+# line-profiler>=4.0

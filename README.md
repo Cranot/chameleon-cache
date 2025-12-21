@@ -277,6 +277,8 @@ variance_ratio = max_frequency / average_frequency
 
 3. **Memory overhead**: 2x ghost buffer + frequency dict uses more memory than TinyLFU's Bloom filter + Count-Min Sketch.
 
+4. **Phase transitions (noise→loop)**: On Caffeine's stress test (corda→loop×5→corda), Chameleon scores 0.01% vs TinyLFU's 26.26%. The adaptive mode switching that helps on normal workloads causes catastrophic oscillation on extreme phase transitions. See [STRESS_TEST_ANALYSIS.md](STRESS_TEST_ANALYSIS.md) for details.
+
 ## Why No Bloom Filter?
 
 TinyLFU uses a Bloom filter + Count-Min Sketch for frequency estimation. Chameleon uses a simpler approach:

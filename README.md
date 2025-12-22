@@ -6,7 +6,7 @@
 ![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Tests: 24 passing](https://img.shields.io/badge/Tests-24%20passing-brightgreen.svg)
 
-Chameleon uses statistical variance to dynamically adapt to workload phases, achieving **+1.42pp** improvement over the state-of-the-art TinyLFU algorithm.
+Chameleon uses statistical variance to dynamically adapt to workload phases, achieving **+2.46pp** improvement over TinyLFU on the Caffeine stress test (98.8% of theoretical optimal).
 
 ## Quick Start
 
@@ -23,6 +23,13 @@ hit = cache.access("user:123")  # Returns True on hit, False on miss
 
 ## Results
 
+**Caffeine Stress Test (v1.1):**
+```
+Chameleon:  28.72%  (98.8% of optimal)  <-- WINNER
+TinyLFU:    26.26%  (+2.46pp improvement)
+```
+
+**General Benchmarks:**
 ```
 Algorithm        Overall      Real     Synth
 ----------------------------------------------------
@@ -108,6 +115,25 @@ flowchart TD
     L -->|Yes| M[FREQ Mode]
     L -->|No| N[MIXED Mode]
 ```
+
+## Skip-Decay: Adaptive Frequency Decay (v1.1)
+
+![Skip-Decay Mechanism](assets/skip-decay.jpeg)
+
+The v1.1 release adds **Skip-Decay** - a mechanism that skips frequency decay when the cache is performing well (hit rate > 40%). This prevents unnecessary churn during stable phases.
+
+**Key insight:** Decay helps during transitions (flushes stale frequencies) but hurts during stable phases (causes unnecessary churn).
+
+## Caffeine Stress Test Results
+
+![Stress Test Results](assets/stress-test-results.jpeg)
+
+On the Caffeine stress test (Corda → Loop x5 → Corda, 4.4M accesses):
+- **Chameleon: 28.72%** (98.8% of theoretical optimal)
+- TinyLFU: 26.26%
+- **Improvement: +2.46pp**
+
+On the Loop phase, Chameleon matches LIRS at 50.01%.
 
 ## Benchmark Results
 
@@ -277,8 +303,6 @@ variance_ratio = max_frequency / average_frequency
 
 3. **Memory overhead**: 2x ghost buffer + frequency dict uses more memory than TinyLFU's Bloom filter + Count-Min Sketch.
 
-4. **Phase transitions (noise→loop)**: On Caffeine's stress test (corda→loop×5→corda), Chameleon scores 0.01% vs TinyLFU's 26.26%. The adaptive mode switching that helps on normal workloads causes catastrophic oscillation on extreme phase transitions. See [STRESS_TEST_ANALYSIS.md](STRESS_TEST_ANALYSIS.md) for details.
-
 ## Why No Bloom Filter?
 
 TinyLFU uses a Bloom filter + Count-Min Sketch for frequency estimation. Chameleon uses a simpler approach:
@@ -294,12 +318,20 @@ The trade-off: Chameleon uses more memory but gains exact frequency counts and t
 
 This algorithm emerged from a systematic exploration:
 
+**v1.0 - Basin of Leniency:**
 1. **Initial hypothesis**: Variance-based mode switching could improve on TinyLFU
 2. **Problem discovered**: Regression on Hill-Cache trace (-7.37pp)
 3. **Root cause**: Ghost buffer was too helpful in loops, causing over-admission
 4. **Solution**: The "Basin of Leniency" - non-linear ghost utility response
 5. **Tuning**: Auto-tuner found 12% as optimal loop detection threshold
 6. **Result**: +1.42pp overall improvement while fixing the regression
+
+**v1.1 - Skip-Decay:**
+1. **Challenge**: Caffeine stress test (Corda → Loop x5 → Corda) exposed weakness
+2. **Root cause**: Frequency decay during stable phases caused unnecessary churn
+3. **Insight**: Decay helps transitions but hurts stability
+4. **Solution**: Skip decay when hit rate > 40%
+5. **Result**: 28.72% on stress test (98.8% of theoretical optimal, +2.46pp vs TinyLFU)
 
 ## Related Work
 
@@ -358,6 +390,7 @@ If you use Chameleon in your research, please cite:
 
 ## Acknowledgments
 
+- Ben Manes ([@ben-manes](https://github.com/ben-manes)) for the Caffeine stress test and invaluable feedback on adaptive caching
 - TinyLFU paper for the foundational window-based approach
 - SIEVE and S3-FIFO papers for insights on scan resistance
 - The benchmark traces: Hill-Cache, CloudPhysics, Twitter

@@ -560,7 +560,10 @@ class Chameleon:
                  'hits', 'misses', 'unique_count', 'win_cap', 'main_cap', 'ghost_cap',
                  'max_freq_seen', 'window_accesses', 'window_uniques', 'window_freq',
                  'is_high_variance', 'is_flat_variance', 'last_ghost_hit',
-                 'ghost_hits', 'ghost_lookups', 'ghost_utility')
+                 'ghost_hits', 'ghost_lookups', 'ghost_utility',
+                 # Skip-decay tracking (v1.1)
+                 'recent_hit_rate', 'skip_decay_hits', 'skip_decay_accesses',
+                 'skip_decay_interval', 'last_skip_decay_reset')
 
     def __init__(self, cap):
         self.cap = cap
@@ -603,8 +606,16 @@ class Chameleon:
         self.ghost_lookups = 0       # Total cache misses in current window
         self.ghost_utility = 0.0     # ghost_hits / ghost_lookups (>2% = useful)
 
+        # Skip-decay tracking (v1.1 enhancement)
+        self.recent_hit_rate = 0.0
+        self.skip_decay_hits = 0
+        self.skip_decay_accesses = 0
+        self.skip_decay_interval = max(100, cap // 2)
+        self.last_skip_decay_reset = 0
+
     def access(self, k):
         self.ops += 1
+        self.skip_decay_accesses += 1
         old_freq = self.freq.get(k, 0)
         self.freq[k] = min(15, old_freq + 1)
 
@@ -627,12 +638,14 @@ class Chameleon:
         # Window hit
         if k in self.window:
             self.hits += 1
+            self.skip_decay_hits += 1
             self.window.move_to_end(k)
             return True
 
         # Main hit
         if k in self.main:
             self.hits += 1
+            self.skip_decay_hits += 1
             self.main.move_to_end(k)
             return True
 
@@ -659,6 +672,14 @@ class Chameleon:
 
         # Add to window (TinyLFU pattern - always buffer new items)
         self._add_to_window(k)
+
+        # Update skip-decay hit rate tracking
+        if self.ops - self.last_skip_decay_reset >= self.skip_decay_interval:
+            if self.skip_decay_accesses > 0:
+                self.recent_hit_rate = self.skip_decay_hits / self.skip_decay_accesses
+            self.skip_decay_hits = 0
+            self.skip_decay_accesses = 0
+            self.last_skip_decay_reset = self.ops
 
         # Periodic mode detection
         if self.ops - self.last_check >= self.check_interval:
@@ -855,8 +876,23 @@ class Chameleon:
         self.ghost_lookups = 0
 
     def _decay(self):
-        """Periodic frequency decay."""
+        """
+        Periodic frequency decay with skip-decay enhancement.
+
+        Skip decay when hit rate is high (>40%) to prevent churn
+        in stable phases.
+        """
+        # Skip decay if cache is performing well
+        if self.recent_hit_rate > 0.40:
+            self.ops = 0
+            self.last_check = 0
+            self.last_skip_decay_reset = 0
+            return
+
+        # Normal decay when cache is struggling
         self.ops = 0
+        self.last_check = 0
+        self.last_skip_decay_reset = 0
         self.freq = {k: v >> 1 for k, v in self.freq.items() if v > 1}
 
 

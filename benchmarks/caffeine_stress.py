@@ -33,14 +33,14 @@ def load_loop_trace():
         return [int(line.strip()) for line in f]
 
 def load_corda_trace():
-    """Load Corda trace_vaultservice_large.gz - 16-byte binary keys."""
+    """Load Corda trace_vaultservice_large.gz - 8-byte binary keys."""
     path = TRACES_DIR / "trace_vaultservice_large.gz"
     with gzip.open(path, 'rb') as f:
         data = f.read()
-    # Each entry is 16 bytes (UUID-like)
+    # Each entry is 8 bytes (confirmed: LRU gets 33.33% with this parsing)
     keys = []
-    for i in range(0, len(data), 16):
-        keys.append(data[i:i+16])
+    for i in range(0, len(data), 8):
+        keys.append(data[i:i+8])
     return keys
 
 def build_chained_trace():

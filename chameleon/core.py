@@ -1,15 +1,13 @@
 """
 Chameleon Cache: Adaptive Variance-Aware Replacement Policy
-v1.1 - Skip-Decay Enhancement
-
-Beats TinyLFU by +2.65pp on stress tests (28.75% vs 26.10% on Corda->Loop->Corda).
-Achieves 98.9% of theoretical optimal across diverse workloads.
+v1.2 - Temporal Locality Enhancement
 
 Key Innovations:
 1. Variance-Based Mode Switching: Detects Zipf (High Variance) vs Loop (Low Variance)
 2. Ghost Utility Tracking: Measures how useful the ghost buffer is (0-100%)
 3. Non-Linear Admission: The "Basin of Leniency" - strict at both extremes, lenient in the middle
-4. Skip-Decay: Skips frequency decay when cache is performing well (hit rate > 40%)
+4. Skip-Decay (v1.1): Skips frequency decay when cache is performing well (hit rate > 40%)
+5. Temporal Locality Support (v1.2): Trusts recency for first-time items when items frequently return
 
 The Core Insight (Ghost Utility Response):
 - Low Utility (<2%):   STRICT - Random noise, don't trust returning items
@@ -236,11 +234,17 @@ class ChameleonCache:
         victim, _ = self.main.popitem(last=False)
         v_freq = self.freq.get(victim, 0)
 
-        # === THE BASIN OF LENIENCY ===
+        # === THE BASIN OF LENIENCY (v1.2: with temporal locality support) ===
         # Ghost utility determines our admission strictness
 
         ghost_is_useful = self.ghost_utility > 0.02      # Medium signal
-        ghost_is_loop = self.ghost_utility > 0.12       # Strong loop (tuned: 12%)
+        ghost_is_loop = self.ghost_utility > 0.12 and self.is_flat_variance  # v1.2: require flat variance
+
+        # v1.2 FIX: High ghost utility + NOT flat variance = temporal locality
+        # Items return frequently but aren't cycling in a loop pattern
+        # Trust recency for first-time items (they haven't had a chance to prove frequency)
+        is_temporal_locality = self.ghost_utility > 0.15 and not self.is_flat_variance
+        is_first_time = k_freq <= 1  # Item hasn't been accessed while in cache
 
         # Non-linear response:
         # - Low utility: strict (noise)
@@ -262,7 +266,13 @@ class ChameleonCache:
         should_admit = False
         has_returning_support = k_freq > 1
 
-        if self.mode == 'SCAN':
+        # v1.2 FIX: Trust recency for first-time items in temporal locality patterns
+        # When items frequently return (high ghost utility) but aren't cycling (not flat),
+        # first-time items are likely to return too - give them a chance
+        if is_temporal_locality and is_first_time:
+            # Lenient comparison for first-time items in temporal locality
+            should_admit = k_freq >= v_freq or v_freq <= 2  # Can beat low-freq victims
+        elif self.mode == 'SCAN':
             # Strict: require better frequency
             if k_freq > v_freq:
                 should_admit = True
@@ -324,7 +334,7 @@ class ChameleonCache:
             self.is_flat_variance = variance_ratio < 5   # Loop-like
         else:
             self.is_high_variance = False
-            self.is_flat_variance = True
+            self.is_flat_variance = False  # v1.2: Don't assume loop until proven
 
         # Calculate ghost utility (the key metric)
         if self.ghost_lookups > 0:
@@ -338,8 +348,20 @@ class ChameleonCache:
         self.window_accesses = 0
         self.max_freq_seen = 0
 
-        # Loop detection: high ghost utility = strong loop
-        is_loop_pattern = self.ghost_utility > 0.12  # Tuned threshold
+        # Loop detection: high ghost utility AND flat variance = strong loop
+        # v1.2 FIX: Corda has high ghost utility (33%) but is NOT a loop
+        # Loops have BOTH high ghost utility AND flat variance (all items similar)
+        # Temporal locality (like Corda) has high ghost utility but moderate variance
+        is_loop_pattern = self.ghost_utility > 0.12 and self.is_flat_variance
+
+        # v1.2 FIX: Detect when our strategy is failing
+        # If ghost utility is high (items returning) but hit rate is very low (we're not catching them),
+        # then our current approach isn't working - switch to RECENCY regardless of variance
+        # This handles Corda which has flat variance (looks like loop) but isn't a loop
+        is_strategy_failing = (
+            self.ghost_utility > 0.20 and  # Items are definitely returning
+            hit_rate < 0.05                # But we're getting almost no hits
+        )
 
         # === MODE SELECTION HIERARCHY ===
 
@@ -347,6 +369,13 @@ class ChameleonCache:
             # Warmup: use permissive mode
             self.mode = 'MIXED'
             self.win_cap = max(1, self.cap // 10)
+
+        elif is_strategy_failing:
+            # v1.2 PRIORITY 0.5: Strategy failing - items return but we can't catch them
+            # This overrides loop detection because if ghost utility is high but hits are near-zero,
+            # our current approach is wrong regardless of variance
+            self.mode = 'RECENCY'
+            self.win_cap = max(1, self.cap // 3)
 
         elif is_loop_pattern:
             # PRIORITY 0: Strong loop override

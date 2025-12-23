@@ -727,7 +727,12 @@ class Chameleon:
         # Don't rush to admit on first return. Wait for genuine frequency buildup.
         # This is why TinyLFU wins on Hill - strict ">" prevents churn.
         ghost_is_useful = self.ghost_utility > 0.02
-        ghost_is_loop = self.ghost_utility > 0.12  # Strong loop signal (auto-tuned: 12%)
+        ghost_is_loop = self.ghost_utility > 0.12 and self.is_flat_variance  # v1.2: require flat variance
+
+        # v1.2 FIX: High ghost utility + NOT flat variance = temporal locality
+        # Items return frequently but aren't cycling in a loop pattern
+        is_temporal_locality = self.ghost_utility > 0.15 and not self.is_flat_variance
+        is_first_time = k_freq <= 1  # Item hasn't been accessed while in cache
 
         # REFINED TIE-BREAKING (Gemini's insight):
         # In high-variance (Zipf) mode, freq=1 items are "one-hit wonders" - reject ties.
@@ -743,7 +748,11 @@ class Chameleon:
                 or ghost_is_useful  # Ghost is proving useful
             )
 
-        if self.mode == 'SCAN':
+        # v1.2 FIX: Trust recency for first-time items in temporal locality patterns
+        if is_temporal_locality and is_first_time:
+            # Lenient comparison for first-time items in temporal locality
+            should_admit = k_freq >= v_freq or v_freq <= 2  # Can beat low-freq victims
+        elif self.mode == 'SCAN':
             # SCAN MODE: Trust Ghost when utility is useful (but not for strong loops)
             if k_freq > v_freq:
                 should_admit = True
@@ -806,7 +815,7 @@ class Chameleon:
             self.is_flat_variance = variance_ratio < 5
         else:
             self.is_high_variance = False
-            self.is_flat_variance = True  # Default to flat if no data
+            self.is_flat_variance = False  # v1.2: Don't assume loop until proven
 
         # Calculate Ghost Utility (Gemini Final: "The Tale of Two Tails")
         # High utility = Loop (ghost returning items) -> trust ghost even in strict mode
@@ -828,14 +837,30 @@ class Chameleon:
 
         old_mode = self.mode
 
-        # LOOP DETECTION: High ghost utility (>12%) means strong loop pattern
-        # Force TinyLFU-like behavior: tiny window + strict admission
-        is_loop_pattern = self.ghost_utility > 0.12  # Auto-tuned: 12%
+        # LOOP DETECTION: High ghost utility (>12%) AND flat variance = strong loop pattern
+        # v1.2 FIX: Corda has high ghost utility (33%) but is NOT a loop (has variance)
+        # Force TinyLFU-like behavior only for true loops
+        is_loop_pattern = self.ghost_utility > 0.12 and self.is_flat_variance
+
+        # v1.2 FIX: Detect when our strategy is failing
+        # If ghost utility is high (items returning) but hit rate is very low (we're not catching them),
+        # then our current approach isn't working - switch to RECENCY regardless of variance
+        # This handles Corda which has flat variance (looks like loop) but isn't a loop
+        is_strategy_failing = (
+            self.ghost_utility > 0.20 and  # Items are definitely returning
+            hit_rate < 0.05                # But we're getting almost no hits
+        )
 
         # WARMUP: Use permissive MIXED mode until we have enough data
         if not warmup_complete:
             self.mode = 'MIXED'
             self.win_cap = max(1, self.cap // 10)
+        # v1.2 PRIORITY 0.5: Strategy failing - items return but we can't catch them
+        # This overrides loop detection because if ghost utility is high but hits are near-zero,
+        # our current approach is wrong regardless of variance
+        elif is_strategy_failing:
+            self.mode = 'RECENCY'  # Trust recency, admit new items
+            self.win_cap = max(1, self.cap // 3)  # Large 33% window for probation
         # PRIORITY 0 (NEW): Ghost Loop Override - acts like TinyLFU
         # When ghost buffer is proving very useful (loop), use strict mode
         elif is_loop_pattern:

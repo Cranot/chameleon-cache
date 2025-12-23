@@ -6,7 +6,7 @@
 ![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Tests: 24 passing](https://img.shields.io/badge/Tests-24%20passing-brightgreen.svg)
 
-Chameleon uses statistical variance to dynamically adapt to workload phases, achieving **+2.46pp** improvement over TinyLFU on the Caffeine stress test (98.8% of theoretical optimal).
+Chameleon uses statistical variance to dynamically adapt to workload phases, achieving **39.93%** on the Caffeine stress test — beating TinyLFU-Adaptive (34.84%) by **+5.09pp**.
 
 ## Quick Start
 
@@ -23,22 +23,22 @@ hit = cache.access("user:123")  # Returns True on hit, False on miss
 
 ## Results
 
-**Caffeine Stress Test (v1.1):**
+**Caffeine Stress Test (v1.2) — corda → loop x5 → corda:**
 ```
-Chameleon:  28.72%  (98.8% of optimal)  <-- WINNER
-TinyLFU:    26.26%  (+2.46pp improvement)
+chameleon           :  39.93%  <-- WINNER
+tinylfu-adaptive    :  34.84%
+lru                 :  19.90%
+arc                 :  19.90%
+tinylfu             :  18.46%
 ```
 
-**General Benchmarks:**
-```
-Algorithm        Overall      Real     Synth
-----------------------------------------------------
-chameleon        61.16%    44.62%    69.43%   <-- BEST
-tinylfu          59.74%    44.58%    67.32%
-s3fifo           33.47%    43.08%    28.66%
-sieve            32.16%    41.72%    27.37%
-lru              30.66%    38.96%    26.50%
-```
+**Phase Breakdown:**
+| Phase | Chameleon | LRU | Optimal |
+|-------|-----------|-----|---------|
+| Corda (temporal) | 33.13% | 33.33% | 33.33% |
+| Loop x5 (scan) | 50.04% | 0.00% | 50.10% |
+
+Chameleon is the only algorithm that handles **both** recency-biased (Corda) and frequency-biased (Loop) workloads.
 
 ## Why Chameleon?
 
@@ -124,20 +124,7 @@ The v1.1 release adds **Skip-Decay** - a mechanism that skips frequency decay wh
 
 **Key insight:** Decay helps during transitions (flushes stale frequencies) but hurts during stable phases (causes unnecessary churn).
 
-## Caffeine Stress Test Results
-
-![Stress Test Results](assets/stress-test-results.jpeg)
-
-On the Caffeine stress test (Corda → Loop x5 → Corda, 4.4M accesses):
-- **Chameleon: 28.72%** (98.8% of theoretical optimal)
-- TinyLFU: 26.26%
-- **Improvement: +2.46pp**
-
-On the Loop phase, Chameleon matches LIRS at 50.01%.
-
 ## Benchmark Results
-
-![Benchmark Results](assets/benchmark-results.png)
 
 Tested on 3 real-world traces + 6 synthetic workloads:
 
@@ -180,6 +167,7 @@ Tested on 3 real-world traces + 6 synthetic workloads:
 
 | Trace | Domain | Characteristics |
 |-------|--------|-----------------|
+| **Corda** | Blockchain DB | 50% one-hit, 50% two-hit, temporal locality |
 | **Hill-Cache** | Storage Block I/O | Loop-heavy, sequential patterns |
 | **CloudPhysics** | Virtualization | Noise + scans, low locality |
 | **Twitter** | Social Graph | Zipf + temporal churn, high locality |
@@ -331,7 +319,14 @@ This algorithm emerged from a systematic exploration:
 2. **Root cause**: Frequency decay during stable phases caused unnecessary churn
 3. **Insight**: Decay helps transitions but hurts stability
 4. **Solution**: Skip decay when hit rate > 40%
-5. **Result**: 28.72% on stress test (98.8% of theoretical optimal, +2.46pp vs TinyLFU)
+5. **Result**: Improved loop phase performance
+
+**v1.2 - Temporal Locality:**
+1. **Challenge**: Corda trace (624K one-hit + 624K two-hit keys) got 0.61% vs LRU's 33.33%
+2. **Root cause**: Frequency filter rejected 83% of first-time items (freq=1 can't beat freq=2+)
+3. **Insight**: When ghost utility is high but hit rate is near-zero, our strategy is failing
+4. **Solution**: Detect strategy failure and trust recency for first-time items
+5. **Result**: 39.93% on stress test (+5.09pp vs TinyLFU-Adaptive), matching optimal on both phases
 
 ## Related Work
 

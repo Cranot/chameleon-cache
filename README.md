@@ -389,3 +389,11 @@ If you use Chameleon in your research, please cite:
 - TinyLFU paper for the foundational window-based approach
 - SIEVE and S3-FIFO papers for insights on scan resistance
 - The benchmark traces: Hill-Cache, CloudPhysics, Twitter
+
+---
+
+<p align="center">
+  <b>Chameleon Cache</b> - Variance-adaptive caching<br>
+  Made by <a href="https://github.com/Cranot">Dimitris Mitsos</a> & <a href="https://agentskb.com">AgentsKB.com</a><br>
+  Using <a href="https://github.com/Cranot/deep-research">Deep Research</a>
+</p>

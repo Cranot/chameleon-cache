@@ -2,9 +2,9 @@
 
 **A variance-aware cache replacement policy that stops choosing between Zipf and Loops.**
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Tests: 24 passing](https://img.shields.io/badge/Tests-24%20passing-brightgreen.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/Cranot/chameleon-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/Cranot/chameleon-cache/actions/workflows/ci.yml)
 
 Chameleon uses statistical variance to dynamically adapt to workload phases, achieving **39.93%** on the Caffeine stress test — beating TinyLFU-Adaptive (34.84%) by **+5.09pp**.
 
